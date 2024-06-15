@@ -1,0 +1,159 @@
+---
+title: "Heart Attack Prediction"
+output: html_document
+date: "2024-06-12"
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+## Exploratory Data Analysis
+
+```{r}
+# Reading contents into a data frame
+data_df <- read.csv("heart.csv", header = TRUE)
+head(data_df)
+
+# Dimension of data frame
+dim(data_df)
+
+# Structure of data frame
+str(data_df)
+
+# missing values
+sum(is.na(data_df))
+```
+
+### Correlation Matrix Plot
+
+```{r}
+library(corrplot)
+corrplot(cor(data_df), method = 'number')
+```
+
+The correlation plot indicates that the relationships between the predictors are moderate to weak, as evidenced by correlation coefficients below 0.55. This suggests that the predictors are not strongly correlated with one another.
+
+### Distribution of Categorical Variables
+
+```{r}
+# Converting categorical features to factors
+
+data_df$sex <- factor(data_df$sex, levels = c(0, 1))
+data_df$cp <- factor(data_df$cp, levels = c(0, 1, 2, 3))
+data_df$fbs <- factor(data_df$fbs, levels = c(0, 1))
+data_df$restecg <- factor(data_df$restecg, levels = c(0, 1, 2))
+data_df$exang <- factor(data_df$exang, levels = c(0, 1))
+data_df$slope <- factor(data_df$slope, levels = c(0, 1, 2))
+data_df$thal <- factor(data_df$thal, levels = c(0, 1, 2, 3))
+data_df$target <- factor(data_df$target, levels = c(0, 1), labels = c("No", "Yes"))
+
+str(data_df)
+```
+
+### Descriptive Statistics
+
+```{r}
+summary(data_df)
+```
+
+### Histogram distribution of numerical predictors
+
+```{r}
+# subset numeric predictors
+data_df_numeric <- data_df[, sapply(data_df, is.numeric)]
+
+library(Hmisc)
+hist.data.frame(data_df_numeric)
+```
+
+The plot above reveals that numerical predictors display distributions that does not follow a normal distribution. 
+
+### Distribution of categorical features
+
+```{r}
+library(ggplot2)
+
+factor_cols_df <- data_df[sapply(data_df, is.factor)]
+columns <- colnames(factor_cols_df)
+
+# Function to plot the distribution of categorical features
+lapply(columns, function(col) {
+  ggplot(factor_cols_df, aes_string(x = col)) + geom_bar() + 
+    labs(title = paste("Distribution of", col), x = col, y = "Count")
+})
+```
+
+### Boxplot distribution to detect presence of outliers
+
+```{r}
+par(mfrow = c(2, 3))
+for (col in 1:(ncol(data_df_numeric))) {
+  boxplot(data_df_numeric[,col], main = colnames(data_df_numeric)[col], xlab = colnames(data_df_numeric)[col])
+}
+```
+
+The above boxplot indicates the presence of outliers across several predictors including trestbps, chol, thalach, oldpeak and ca. Notably only one predictor, age, appears to be devoid of outliers.
+
+## Data Preprocessing
+
+```{r boxcox}
+library(caret)
+
+# Applying BoxCox transformation to handle skewness
+bct_trans <- preProcess(data_df[, numeric_cols], method = "BoxCox")
+trans_data <- predict(bct_trans, data_df[, numeric_cols])
+hist(trans_data)
+
+data_df[, numeric_cols] <- trans_data
+```
+
+```{r}
+# Distribution of the classes
+table(data_df$target)
+```
+
+The above output shows that the classes are distributed equally and there is no class imbalance problem in the given dataset.
+
+## Data Splitting
+
+```{r data splitting}
+set.seed(476)
+
+# Split the data into training and test sets
+index <- createDataPartition(data_df$target, p = .8, list = FALSE)
+
+trainData <- data_df[index,]
+testData <- data_df[-index,]
+
+# Separate predictors and target variable
+xTrain <- subset(trainData, select = -c(target))
+yTrain <- trainData$target
+xTest <- subset(testData, select = -c(target))
+yTest <- testData$target
+```
+
+## Model Building
+
+### Logistic Regression
+
+```{r}
+# Set training control for model building
+ctrl <- trainControl(method = "cv", summaryFunction = twoClassSummary,
+                     classProbs = TRUE, savePredictions = TRUE)
+
+set.seed(100)
+
+logitFit <- train(x = xTrain, y = yTrain, method = "glm", metric = "ROC",
+                  trControl = ctrl, preProc = c("center", "scale"))
+
+logitFit
+
+# Make predictions
+logitPred <- predict(logitFit, xTest)
+
+# Confusion Matrix
+logitCM <- confusionMatrix(logitPred, yTest, positive = "Yes")
+logitCM
+```
+
