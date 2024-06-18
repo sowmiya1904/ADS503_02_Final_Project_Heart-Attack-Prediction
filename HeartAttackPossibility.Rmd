@@ -133,69 +133,104 @@ xTest <- subset(testData, select = -c(target))
 yTest <- testData$target
 ```
 
-## Model Building
+## Exploratory Data Analysis (EDA)
 
 ```{r}
 # Load necessary libraries
 library(ggplot2)
-library(caret)
-library(randomForest)
-library(e1071)
-library(xgboost)
-library(class)
-library(rpart)
 library(dplyr)
-library(pROC)
-library(caTools)
-library(mlbench)
-library(caretEnsemble)
+library(caret)
+library(corrplot)
 
-# Create a dataframe for model evaluation
-Model <- c('Logistic Regression', 'Naive Bayes', 'Random Forest', 'Extreme Gradient Boost', 'K-Nearest Neighbour', 'Decision Tree', 'Support Vector Machine')
-Accuracy <- c(lr_acc_score*100, nb_acc_score*100, rf_acc_score*100, xgb_acc_score*100, knn_acc_score*100, dt_acc_score*100, svc_acc_score*100)
-model_ev <- data.frame(Model, Accuracy)
+# Load the dataset
+data <- read.csv('heart.csv')
 
-# Print the dataframe
-print(model_ev)
+# Display the structure and summary of the dataset
+str(data)
+summary(data)
 
-# Bar plot for model accuracy
-colors <- c('red', 'green', 'blue', 'gold', 'silver', 'yellow', 'orange')
-ggplot(model_ev, aes(x = Model, y = Accuracy, fill = Model)) + 
-  geom_bar(stat = "identity") + 
-  scale_fill_manual(values = colors) +
-  theme_minimal() + 
-  ggtitle("Barplot Representing Accuracy of Different Models") +
-  xlab("Algorithms") + 
-  ylab("Accuracy %") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# Check for missing values
+colSums(is.na(data))
 
-# Ensembling using StackingCVClassifier equivalent
-# Define trainControl
-train_control <- trainControl(method="cv", number=10, savePredictions = TRUE, classProbs = TRUE)
+# Correlation matrix
+correlation_matrix <- cor(data)
+corrplot(correlation_matrix, method = "circle")
 
-# Define models
-model_list <- caretList(
-  X_train, y_train,
-  trControl = train_control,
-  methodList = c("xgbTree", "knn", "svmRadial")
-)
+# Visualize the distribution of target variable
+ggplot(data, aes(x = factor(target))) + 
+  geom_bar(fill = 'blue') +
+  labs(title = "Distribution of Target Variable", x = "Target", y = "Count")
 
-# Stacking models
-stack_control <- trainControl(method="cv", number=10)
-stack.glm <- caretStack(model_list, method="glm", trControl=stack_control)
+# Visualize the distribution of age
+ggplot(data, aes(x = age)) + 
+  geom_histogram(fill = 'green', bins = 30) +
+  labs(title = "Distribution of Age", x = "Age", y = "Count")
 
-# Predict on test data
-stack_pred <- predict(stack.glm, newdata = X_test)
+# Boxplot of age vs target
+ggplot(data, aes(x = factor(target), y = age)) + 
+  geom_boxplot(fill = 'orange') +
+  labs(title = "Boxplot of Age vs Target", x = "Target", y = "Age")
 
-# Confusion matrix and accuracy
-conf_matrix <- confusionMatrix(stack_pred, y_test)
-scv_acc_score <- conf_matrix$overall['Accuracy'] * 100
+# Barplot of sex vs target
+ggplot(data, aes(x = factor(sex), fill = factor(target))) + 
+  geom_bar(position = "dodge") +
+  labs(title = "Barplot of Sex vs Target", x = "Sex", fill = "Target")
+```
+
+### Modeling
+
+```{r}
+# Split the data into training and testing sets
+set.seed(42)
+trainIndex <- createDataPartition(data$target, p = .7, 
+                                  list = FALSE, 
+                                  times = 1)
+dataTrain <- data[ trainIndex,]
+dataTest  <- data[-trainIndex,]
+
+# Train a logistic regression model
+log_model <- train(target ~ ., data = dataTrain, method = "glm", family = "binomial")
+
+# Train a random forest model
+rf_model <- train(target ~ ., data = dataTrain, method = "rf")
+
+# Train an XGBoost model
+xgb_model <- train(target ~ ., data = dataTrain, method = "xgbTree")
+
+# Evaluate models
+log_pred <- predict(log_model, newdata = dataTest)
+rf_pred <- predict(rf_model, newdata = dataTest)
+xgb_pred <- predict(xgb_model, newdata = dataTest)
+
+log_conf_matrix <- confusionMatrix(log_pred, dataTest$target)
+rf_conf_matrix <- confusionMatrix(rf_pred, dataTest$target)
+xgb_conf_matrix <- confusionMatrix(xgb_pred, dataTest$target)
 
 # Print results
-print("Confusion Matrix:")
-print(conf_matrix$table)
-print(paste("Accuracy of StackingCVClassifier:", scv_acc_score, "\n"))
-print(conf_matrix)
+print(log_conf_matrix)
+print(rf_conf_matrix)
+print(xgb_conf_matrix)
+
+# Ensembling using stacking
+model_list <- caretList(
+  target ~ ., data = dataTrain,
+  trControl = trainControl(method = "cv", number = 10),
+  methodList = c("glm", "rf", "xgbTree")
+)
+
+stack_control <- trainControl(method = "cv", number = 10)
+stack.glm <- caretStack(model_list, method = "glm", trControl = stack_control)
+
+# Predict on test data
+stack_pred <- predict(stack.glm, newdata = dataTest)
+
+# Confusion matrix and accuracy
+stack_conf_matrix <- confusionMatrix(stack_pred, dataTest$target)
+stack_acc_score <- stack_conf_matrix$overall['Accuracy'] * 100
+
+# Print results
+print(stack_conf_matrix)
+print(paste("Accuracy of StackingCVClassifier:", stack_acc_score))
 ```
 
 ### Logistic Regression
