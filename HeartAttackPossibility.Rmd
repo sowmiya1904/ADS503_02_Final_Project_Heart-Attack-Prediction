@@ -233,6 +233,71 @@ print(stack_conf_matrix)
 print(paste("Accuracy of StackingCVClassifier:", stack_acc_score))
 ```
 
+### Model Building
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(caret)
+library(randomForest)
+library(e1071)
+library(xgboost)
+library(class)
+library(rpart)
+library(dplyr)
+library(pROC)
+library(caTools)
+library(mlbench)
+library(caretEnsemble)
+
+# Create a dataframe for model evaluation
+Model <- c('Logistic Regression', 'Naive Bayes', 'Random Forest', 'Extreme Gradient Boost', 'K-Nearest Neighbour', 'Decision Tree', 'Support Vector Machine')
+Accuracy <- c(lr_acc_score*100, nb_acc_score*100, rf_acc_score*100, xgb_acc_score*100, knn_acc_score*100, dt_acc_score*100, svc_acc_score*100)
+model_ev <- data.frame(Model, Accuracy)
+
+# Print the dataframe
+print(model_ev)
+
+# Bar plot for model accuracy
+colors <- c('red', 'green', 'blue', 'gold', 'silver', 'yellow', 'orange')
+ggplot(model_ev, aes(x = Model, y = Accuracy, fill = Model)) + 
+  geom_bar(stat = "identity") + 
+  scale_fill_manual(values = colors) +
+  theme_minimal() + 
+  ggtitle("Barplot Representing Accuracy of Different Models") +
+  xlab("Algorithms") + 
+  ylab("Accuracy %") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Ensembling using StackingCVClassifier equivalent
+# Define trainControl
+train_control <- trainControl(method="cv", number=10, savePredictions = TRUE, classProbs = TRUE)
+
+# Define models
+model_list <- caretList(
+  X_train, y_train,
+  trControl = train_control,
+  methodList = c("xgbTree", "knn", "svmRadial")
+)
+
+# Stacking models
+stack_control <- trainControl(method="cv", number=10)
+stack.glm <- caretStack(model_list, method="glm", trControl=stack_control)
+
+# Predict on test data
+stack_pred <- predict(stack.glm, newdata = X_test)
+
+# Confusion matrix and accuracy
+conf_matrix <- confusionMatrix(stack_pred, y_test)
+scv_acc_score <- conf_matrix$overall['Accuracy'] * 100
+
+# Print results
+print("Confusion Matrix:")
+print(conf_matrix$table)
+print(paste("Accuracy of StackingCVClassifier:", scv_acc_score, "\n"))
+print(conf_matrix)
+```
+
 ### Logistic Regression
 
 ```{r}
