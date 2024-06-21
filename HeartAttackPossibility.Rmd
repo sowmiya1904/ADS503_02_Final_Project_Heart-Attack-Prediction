@@ -6,6 +6,12 @@ date: "2024-06-12"
 
 ```{r setup}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+library(ggplot2)
+library(dplyr)
+library(caret)
+library(corrplot)
+library(Hmisc)
+library(pROC)
 ```
 
 ## Exploratory Data Analysis
@@ -25,17 +31,6 @@ str(data_df)
 sum(is.na(data_df))
 ```
 
-### Correlation Matrix Plot
-
-```{r}
-library(corrplot)
-corrplot(cor(data_df), method = 'number')
-```
-
-The correlation plot indicates that the relationships between the predictors are moderate to weak, as evidenced by correlation coefficients below 0.55. This suggests that the predictors are not strongly correlated with one another.
-
-### Distribution of Categorical Variables
-
 ```{r}
 # Converting categorical features to factors
 
@@ -45,15 +40,23 @@ data_df$fbs <- factor(data_df$fbs, levels = c(0, 1))
 data_df$restecg <- factor(data_df$restecg, levels = c(0, 1, 2))
 data_df$exang <- factor(data_df$exang, levels = c(0, 1))
 data_df$slope <- factor(data_df$slope, levels = c(0, 1, 2))
-data_df$thal <- factor(data_df$thal, levels = c(0, 1, 2, 3))
-data_df$target <- factor(data_df$target, levels = c(0, 1), labels = c("No", "Yes"))
 
+# Update "thal" feature categories
+data_df$thal <- as.character(data_df$thal)
+data_df$thal[data_df$thal == '0'] = "Normal"
+data_df$thal[data_df$thal == '1'] = "Normal"
+data_df$thal[data_df$thal == '2'] = "Fixed Defect"
+data_df$thal[data_df$thal == '3'] = "Reversable Defect"
+data_df$thal = as.factor(data_df$thal)
+
+data_df$target <- factor(data_df$target, levels = c(1, 0), labels = c("Yes", "No"))
+
+# structure of data frame
 str(data_df)
 ```
 
-### Descriptive Statistics
-
 ```{r}
+# Descriptive Statistics
 summary(data_df)
 ```
 
@@ -63,7 +66,7 @@ summary(data_df)
 # subset numeric predictors
 data_df_numeric <- data_df[, sapply(data_df, is.numeric)]
 
-library(Hmisc)
+# Distribution of numerical predictors
 hist.data.frame(data_df_numeric)
 ```
 
@@ -72,16 +75,59 @@ The plot above reveals that numerical predictors display distributions that does
 ### Distribution of categorical features
 
 ```{r}
-library(ggplot2)
+# Barplot of sex vs target
+ggplot(data_df, aes(x = sex, fill = target)) + 
+  geom_bar(position = "dodge") +
+  labs(title = "Barplot of Sex vs Target", x = "Sex", fill = "Target", 
+       caption = "0 = Female, 1 = Male")
+```
 
-factor_cols_df <- data_df[sapply(data_df, is.factor)]
-columns <- colnames(factor_cols_df)
+```{r}
+# Barplot of chest pain (cp) vs target
+ggplot(data_df, aes(x = cp, fill = target)) + 
+  geom_bar(position = "dodge") +
+  labs(title = "Barplot of Chest Pain (cp) vs Target", x = "Chest Pain", fill = "Target", 
+  caption = "0 = Typical Angina, 1 = Atypical Angina, 3 = Non-anginal Pain, 4 = Asymptomatic")
+```
 
-# Function to plot the distribution of categorical features
-lapply(columns, function(col) {
-  ggplot(factor_cols_df, aes_string(x = col)) + geom_bar() + 
-    labs(title = paste("Distribution of", col), x = col, y = "Count")
-})
+```{r}
+# Barplot of Fasting Blood Sugar (fbs) vs target
+ggplot(data_df, aes(x = fbs, fill = target)) + 
+  geom_bar(position = "dodge") +
+  labs(title = "Barplot of Fasting Blood Sugar (fbs) vs Target", x = "FBS", fill = "Target", 
+       caption = "0 = False, 1 = True")
+```
+
+```{r}
+# Barplot of Resting Electrocardiographic Results (restecg) vs target
+ggplot(data_df, aes(x = restecg, fill = target)) + 
+  geom_bar(position = "dodge") +
+  labs(title = "Barplot of Resting Electrocardiographic Results (restecg) vs target", 
+       x = "RestECG", fill = "Target", 
+       caption = "0 = Normal, 1 = ST-T wave Abnormality, 2 = Left Ventricular Hypertrophy")
+```
+
+```{r}
+# Barplot of Exercise Induced Angina (exang) vs target
+ggplot(data_df, aes(x = exang, fill = target)) + 
+  geom_bar(position = "dodge") +
+  labs(title = "Barplot of Exercise Induced Angina (exang) vs target", x = "Exang", fill = "Target",
+       caption = "0 = No, 1 = Yes")
+```
+
+```{r}
+# Barplot of Slope vs target
+ggplot(data_df, aes(x = slope, fill = target)) + 
+  geom_bar(position = "dodge") +
+  labs(title = "Barplot of Slope vs target", x = "Slope", fill = "Target",
+       caption = "0 = Upsloping, 1 = Flat, 2 = Downsloping")
+```
+
+```{r}
+# Barplot of thal vs target
+ggplot(data_df, aes(x = thal, fill = target)) + 
+  geom_bar(position = "dodge") +
+  labs(title = "Barplot of Thal vs target", x = "Thal", fill = "Target")
 ```
 
 ### Boxplot distribution to detect presence of outliers
@@ -95,42 +141,273 @@ for (col in 1:(ncol(data_df_numeric))) {
 
 The above boxplot indicates the presence of outliers across several predictors including trestbps, chol, thalach, oldpeak and ca. Notably only one predictor, age, appears to be devoid of outliers.
 
+```{r}
+# Correlation matrix plot between numerical features
+corrplot(cor(data_df[c('age', 'trestbps', 'chol', 'thalach', 'oldpeak', 'ca')]), method = 'number')
+```
+
+The correlation plot indicates that a moderate relationship between the predictors, as evidenced by correlation coefficients below 0.55. This suggests that the predictors are not strongly correlated with one another.
+
 ## Data Preprocessing
 
-```{r boxcox}
-library(caret)
+### Feature Selection
 
-# Applying BoxCox transformation to handle skewness
-bct_trans <- preProcess(data_df[, numeric_cols], method = "BoxCox")
-trans_data <- predict(bct_trans, data_df[, numeric_cols])
-hist(trans_data)
+**We implement RFE (Recursive Feature Elimination) to identify optimal features in the dataset to predict the diagnosis of heart disease.**
 
-data_df[, numeric_cols] <- trans_data
+```{r}
+# Define the control using random forest function
+rfeCtrl <- rfeControl(functions = rfFuncs, method = "repeatedcv", repeats = 5, number = 10)
+
+# Separate predictors and target variable
+x <- subset(data_df, select = -c(target))
+y <- data_df$target
+
+# Data Partioning
+set.seed(476)
+index <- createDataPartition(y, p = 0.8, list = FALSE)
+
+# Training and Test sets
+xTrain <- x[ index, ]
+xTest <- x[-index, ]
+yTrain <- y[ index]
+yTest <- y[-index]
+
+```
+
+
+```{r}
+# Train RFE model
+rfeTune <- rfe(xTrain, yTrain, sizes = c(1:13), rfeControl = rfeCtrl)
+rfeTune
 ```
 
 ```{r}
-# Distribution of the classes
-table(data_df$target)
+# Extract the selected features
+selected_vars <- predictors(rfeTune)
+selected_vars
+
+# Extract feature importance 
+rfeImp <- varImp(rfeTune, scale = FALSE)
+
+# Convert to a data frame for plotting
+importance_df <- data.frame(
+  Feature = rownames(rfeImp),
+  Importance = rfeImp[ ,1]
+)
+
+# Plot feature importance
+ggplot(importance_df, aes(x = reorder(Feature, Importance), y = Importance, fill = Importance)) + 
+  geom_bar(stat = "identity") + xlab("Features") + ylab("Importance") +
+  ggtitle("Feature Importance Plot using Random Forest") + scale_fill_gradient(low = "blue", high = "red") +
+  theme_minimal()
 ```
 
-The above output shows that the classes are distributed equally and there is no class imbalance problem in the given dataset.
+## Data Preparation for Modeling
 
-## Data Splitting
+```{r}
+# Transfer optimal features and target variable to a new data frame
+final_df <- data_df[, c(selected_vars, "target")]
 
-```{r data splitting}
+# Encode categorical values (thal - thalassemia status) to numerical values
+final_df <- final_df %>% mutate(thal = recode(thal, 
+                                              "Normal" = 0,
+                                              "Fixed Defect" = 1,
+                                              "Reversable Defect" = 2))
+
+# Convert thal to a factor
+final_df$thal <- factor(final_df$thal, levels = c(0,1,2))
+
+head(final_df)
+```
+
+### Checking for Class Imbalance
+
+```{r}
+# Distribution of the classes
+table(final_df$target)
+
+# Distribution of chances of heart attack 
+ggplot(final_df, aes(x = target, fill = target)) + 
+  geom_bar(position = "dodge") +
+  labs(title = "Distribution of chances of heart attack", x = "Heart Attack", 
+       y = "Count", fill = "Target", caption = "Yes = Presence, No = Absence")
+```
+
+Due to the limited size of the dataset with only 303 observations, it is advised against splitting it into separate training and test sets. Instead, resampling methods are utilized for both training the model and assessing its performance. Additionally, the distribution of the response variable shows approximately 54% 'Yes' and 45% 'No', indicating that the dataset is not heavily imbalanced.
+
+
+```{r}
+# Separate predictors and target variable
+X_train <- subset(final_df, select = -c(target))
+y_target <- final_df$target
+
+# Set training control
+ctrl <- trainControl(method = "repeatedCV", number = 10, repeats = 5, 
+                     summaryFunction = twoClassSummary, 
+                     classProbs = TRUE, savePredictions = TRUE)
+```
+
+# Modeling
+
+## Logistic Regression
+
+```{r}
+# Model training
+lr_model <- train(x = X_train, y = y_target, method = "glm", metric = "ROC", trControl = ctrl, 
+                  preProc = c("center", "scale"))
+lr_model
+```
+
+```{r}
+# Make predictions
+lr_preds <- predict(lr_model, X_train)
+
+# Confusion Matrix
+lr_CM <- confusionMatrix(lr_preds, y_target)
+lr_CM
+
+# Plot the ROC curve
+lr_ROC <- roc(lr_model$pred$obs, lr_model$pred$Yes, levels = rev(levels(lr_model$pred$obs)))
+plot(lr_ROC, legacy.axes = TRUE)
+```
+
+## Nearest Shrunken Centroids
+
+```{r}
 set.seed(476)
 
-# Split the data into training and test sets
-index <- createDataPartition(data_df$target, p = .8, list = FALSE)
+# Train the model
+nsc_model <- train(x = X_train, y = y_target, method = "pam", 
+                   tuneGrid = data.frame(threshold = seq(0, 25, length = 30)),
+                   preProc = c("center", "scale"), 
+                   metric = "ROC", 
+                   trControl = ctrl)
+nsc_model
+```
 
-trainData <- data_df[index,]
-testData <- data_df[-index,]
+## Penalized Logistic Regression
 
-# Separate predictors and target variable
-xTrain <- subset(trainData, select = -c(target))
-yTrain <- trainData$target
-xTest <- subset(testData, select = -c(target))
-yTest <- testData$target
+```{r}
+set.seed(476)
+
+plr_grid <- expand.grid(alpha = c(0, .1, .2, .4, .6, .8, 1),
+                        lambda = seq(.01, .2, length = 10))
+# Train the model
+plr_model <- train(x = X_train, y = y_target, method = "glmnet", tuneGrid = plr_grid, 
+                   metric = "ROC", preProc = c("center", "scale"), trControl = ctrl)
+plr_model
+```
+
+```{r}
+# Make predictions
+plr_preds <- predict(plr_model, X_train)
+
+# Confusion Matrix
+plr_CM <- confusionMatrix(plr_preds, y_target)
+plr_CM
+
+# Plot the ROC curve
+plr_ROC <- roc(plr_model$pred$obs, plr_model$pred$Yes, levels = rev(levels(plr_model$pred$obs)))
+plot(plr_ROC, legacy.axes = TRUE)
+```
+
+## Neural Network
+
+```{r}
+set.seed(476)
+
+nnet_grid <- expand.grid(size = 1:3, decay = c(0, 0.1, 0.2, 0.3, 0.4, 0.5, 1, 2))
+
+nnet_model <- train(x = X_train, y = y_target, method = "nnet", tuneGrid = nnet_grid,
+                    metric = "ROC", trace = FALSE, maxit = 2000, trControl = ctrl,
+                    preProc = c("center", "scale"))
+nnet_model
+```
+
+```{r}
+# Make predictions
+nnet_preds <- predict(nnet_model, X_train)
+
+# Confusion Matrix
+nnet_CM <- confusionMatrix(nnet_preds, y_target)
+nnet_CM
+
+# Plot the ROC curve
+nnet_ROC <- roc(nnet_model$pred$obs, nnet_model$pred$Yes, levels = rev(levels(nnet_model$pred$obs)))
+plot(nnet_ROC, legacy.axes = TRUE)
+```
+
+## K-Nearest Neighbors
+
+```{r}
+set.seed(476)
+
+knn_model <- train(x = X_train, y = y_target, method = "knn", tuneLength = 20,
+                   metric = "ROC", trControl = ctrl, preProc = c("center", "scale"))
+knn_model
+```
+
+```{r}
+# Make predictions
+knn_preds <- predict(knn_model, X_train)
+
+# Confusion Matrix
+knn_CM <- confusionMatrix(knn_preds, y_target)
+knn_CM
+
+# Plot the ROC curve
+knn_ROC <- roc(knn_model$pred$obs, knn_model$pred$Yes, levels = rev(levels(knn_model$pred$obs)))
+plot(knn_ROC, legacy.axes = TRUE)
+```
+
+## Decision Trees
+
+```{r}
+set.seed(476)
+
+dt_model <- train(x = X_train, y = y_target, method = "rpart", tuneLength = 30,
+                  metric = "ROC", trControl = ctrl, preProc = c("center", "scale"))
+dt_model
+```
+
+```{r}
+# Make predictions
+dt_preds <- predict(dt_model, X_train)
+
+# Confusion Matrix
+dt_CM <- confusionMatrix(dt_preds, y_target)
+dt_CM
+
+# Plot the ROC curve
+dt_ROC <- roc(dt_model$pred$obs, dt_model$pred$Yes, levels = rev(levels(dt_model$pred$obs)))
+plot(dt_ROC, legacy.axes = TRUE)
+
+```
+
+## Random Forest
+
+```{r}
+set.seed(476)
+
+mtry_values <- seq(1,10,1)
+
+rf_model <- train(x = X_train, y = y_target, method = "rf", ntree = 1000,
+                  tuneGrid = data.frame(mtry = mtry_values),
+                  metric = "ROC", trControl = ctrl, preProc = c("center", "scale"))
+rf_model
+```
+
+```{r}
+# Make predictions
+rf_preds <- predict(rf_model, X_train)
+
+# Confusion Matrix
+rf_CM <- confusionMatrix(rf_preds, y_target)
+rf_CM
+
+# Plot the ROC curve
+rf_ROC <- roc(rf_model$pred$obs, rf_model$pred$Yes, levels = rev(levels(rf_model$pred$obs)))
+plot(rf_ROC, legacy.axes = TRUE)
 ```
 
 ## Exploratory Data Analysis (EDA)
@@ -298,25 +575,5 @@ print(paste("Accuracy of StackingCVClassifier:", scv_acc_score, "\n"))
 print(conf_matrix)
 ```
 
-### Logistic Regression
 
-```{r}
-# Set training control for model building
-ctrl <- trainControl(method = "cv", summaryFunction = twoClassSummary,
-                     classProbs = TRUE, savePredictions = TRUE)
-
-set.seed(100)
-
-logitFit <- train(x = xTrain, y = yTrain, method = "glm", metric = "ROC",
-                  trControl = ctrl, preProc = c("center", "scale"))
-
-logitFit
-
-# Make predictions
-logitPred <- predict(logitFit, xTest)
-
-# Confusion Matrix
-logitCM <- confusionMatrix(logitPred, yTest, positive = "Yes")
-logitCM
-```
 
