@@ -242,7 +242,7 @@ X_train <- subset(final_df, select = -c(target))
 y_target <- final_df$target
 
 # Set training control
-ctrl <- trainControl(method = "repeatedCV", number = 10, repeats = 5, 
+ctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 5, 
                      summaryFunction = twoClassSummary, 
                      classProbs = TRUE, savePredictions = TRUE)
 ```
@@ -271,18 +271,28 @@ lr_ROC <- roc(lr_model$pred$obs, lr_model$pred$Yes, levels = rev(levels(lr_model
 plot(lr_ROC, legacy.axes = TRUE)
 ```
 
-## Nearest Shrunken Centroids
+## Mixture Discriminant Analysis
 
 ```{r}
 set.seed(476)
 
-# Train the model
-nsc_model <- train(x = X_train, y = y_target, method = "pam", 
-                   tuneGrid = data.frame(threshold = seq(0, 25, length = 30)),
-                   preProc = c("center", "scale"), 
-                   metric = "ROC", 
-                   trControl = ctrl)
-nsc_model
+mda_model <- train(x = X_train, y = y_target, method = "mda", 
+                   tuneGrid = expand.grid(subclasses=1:3),
+                   metric = "ROC", trControl = ctrl)
+mda_model
+```
+
+```{r}
+# Make predictions
+mda_preds <- predict(mda_model, X_train)
+
+# Confusion Matrix
+mda_CM <- confusionMatrix(mda_preds, y_target)
+mda_CM
+
+# Plot the ROC curve
+mda_ROC <- roc(mda_model$pred$obs, mda_model$pred$Yes, levels = rev(levels(mda_model$pred$obs)))
+plot(mda_ROC, legacy.axes = TRUE)
 ```
 
 ## Penalized Logistic Regression
@@ -389,7 +399,7 @@ plot(dt_ROC, legacy.axes = TRUE)
 ```{r}
 set.seed(476)
 
-mtry_values <- seq(1,10,1)
+mtry_values <- seq(1, min(10, ncol(X_train)), 1)
 
 rf_model <- train(x = X_train, y = y_target, method = "rf", ntree = 1000,
                   tuneGrid = data.frame(mtry = mtry_values),
@@ -410,170 +420,81 @@ rf_ROC <- roc(rf_model$pred$obs, rf_model$pred$Yes, levels = rev(levels(rf_model
 plot(rf_ROC, legacy.axes = TRUE)
 ```
 
-## Exploratory Data Analysis (EDA)
+# Models Evaluation
+
+## Model Performance based on ROC-AUC and Accuracy metrics
 
 ```{r}
-# Load necessary libraries
-library(ggplot2)
-library(dplyr)
-library(caret)
-library(corrplot)
+# ROC-AUC Results
+lr_AUC <- auc(lr_ROC)
+mda_AUC <- auc(mda_ROC)
+plr_AUC <- auc(plr_ROC)
+nnet_AUC <- auc(nnet_ROC)
+knn_AUC <- auc(knn_ROC)
+dt_AUC <- auc(dt_ROC)
+rf_AUC <- auc(rf_ROC)
 
-# Load the dataset
-data <- read.csv('heart.csv')
+# Accuracy Results
+lr_Acc <- lr_CM$overall['Accuracy']
+mda_Acc <- mda_CM$overall['Accuracy']
+plr_Acc <- plr_CM$overall['Accuracy']
+nnet_Acc <- nnet_CM$overall['Accuracy']
+knn_Acc <- knn_CM$overall['Accuracy']
+dt_Acc <- dt_CM$overall['Accuracy']
+rf_Acc <- rf_CM$overall['Accuracy']
 
-# Display the structure and summary of the dataset
-str(data)
-summary(data)
-
-# Check for missing values
-colSums(is.na(data))
-
-# Correlation matrix
-correlation_matrix <- cor(data)
-corrplot(correlation_matrix, method = "circle")
-
-# Visualize the distribution of target variable
-ggplot(data, aes(x = factor(target))) + 
-  geom_bar(fill = 'blue') +
-  labs(title = "Distribution of Target Variable", x = "Target", y = "Count")
-
-# Visualize the distribution of age
-ggplot(data, aes(x = age)) + 
-  geom_histogram(fill = 'green', bins = 30) +
-  labs(title = "Distribution of Age", x = "Age", y = "Count")
-
-# Boxplot of age vs target
-ggplot(data, aes(x = factor(target), y = age)) + 
-  geom_boxplot(fill = 'orange') +
-  labs(title = "Boxplot of Age vs Target", x = "Target", y = "Age")
-
-# Barplot of sex vs target
-ggplot(data, aes(x = factor(sex), fill = factor(target))) + 
-  geom_bar(position = "dodge") +
-  labs(title = "Barplot of Sex vs Target", x = "Sex", fill = "Target")
-```
-
-### Modeling
-
-```{r}
-# Split the data into training and testing sets
-set.seed(42)
-trainIndex <- createDataPartition(data$target, p = .7, 
-                                  list = FALSE, 
-                                  times = 1)
-dataTrain <- data[ trainIndex,]
-dataTest  <- data[-trainIndex,]
-
-# Train a logistic regression model
-log_model <- train(target ~ ., data = dataTrain, method = "glm", family = "binomial")
-
-# Train a random forest model
-rf_model <- train(target ~ ., data = dataTrain, method = "rf")
-
-# Train an XGBoost model
-xgb_model <- train(target ~ ., data = dataTrain, method = "xgbTree")
-
-# Evaluate models
-log_pred <- predict(log_model, newdata = dataTest)
-rf_pred <- predict(rf_model, newdata = dataTest)
-xgb_pred <- predict(xgb_model, newdata = dataTest)
-
-log_conf_matrix <- confusionMatrix(log_pred, dataTest$target)
-rf_conf_matrix <- confusionMatrix(rf_pred, dataTest$target)
-xgb_conf_matrix <- confusionMatrix(xgb_pred, dataTest$target)
-
-# Print results
-print(log_conf_matrix)
-print(rf_conf_matrix)
-print(xgb_conf_matrix)
-
-# Ensembling using stacking
-model_list <- caretList(
-  target ~ ., data = dataTrain,
-  trControl = trainControl(method = "cv", number = 10),
-  methodList = c("glm", "rf", "xgbTree")
+metrics_df <- data.frame(
+  Model = c("Logistic Regression", "Mixture Discriminant Analysis", "Penalized Logistic Regression",
+                                 "Neural Network", "K-Nearest Neighbor", "Decision Trees", "Random Forest"),
+  ROC_AUC = c(lr_AUC, mda_AUC, plr_AUC, nnet_AUC, knn_AUC, dt_AUC, rf_AUC),
+  Accuracy = c(lr_Acc, mda_Acc, plr_Acc, nnet_Acc, knn_Acc, dt_Acc, rf_Acc)
 )
 
-stack_control <- trainControl(method = "cv", number = 10)
-stack.glm <- caretStack(model_list, method = "glm", trControl = stack_control)
-
-# Predict on test data
-stack_pred <- predict(stack.glm, newdata = dataTest)
-
-# Confusion matrix and accuracy
-stack_conf_matrix <- confusionMatrix(stack_pred, dataTest$target)
-stack_acc_score <- stack_conf_matrix$overall['Accuracy'] * 100
-
-# Print results
-print(stack_conf_matrix)
-print(paste("Accuracy of StackingCVClassifier:", stack_acc_score))
+metrics_df
 ```
 
-### Model Building
+## Models ROC_AUC Comparison
 
 ```{r}
-# Load necessary libraries
-library(ggplot2)
-library(caret)
-library(randomForest)
-library(e1071)
-library(xgboost)
-library(class)
-library(rpart)
-library(dplyr)
-library(pROC)
-library(caTools)
-library(mlbench)
-library(caretEnsemble)
-
-# Create a dataframe for model evaluation
-Model <- c('Logistic Regression', 'Naive Bayes', 'Random Forest', 'Extreme Gradient Boost', 'K-Nearest Neighbour', 'Decision Tree', 'Support Vector Machine')
-Accuracy <- c(lr_acc_score*100, nb_acc_score*100, rf_acc_score*100, xgb_acc_score*100, knn_acc_score*100, dt_acc_score*100, svc_acc_score*100)
-model_ev <- data.frame(Model, Accuracy)
-
-# Print the dataframe
-print(model_ev)
-
-# Bar plot for model accuracy
-colors <- c('red', 'green', 'blue', 'gold', 'silver', 'yellow', 'orange')
-ggplot(model_ev, aes(x = Model, y = Accuracy, fill = Model)) + 
-  geom_bar(stat = "identity") + 
-  scale_fill_manual(values = colors) +
-  theme_minimal() + 
-  ggtitle("Barplot Representing Accuracy of Different Models") +
-  xlab("Algorithms") + 
-  ylab("Accuracy %") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-# Ensembling using StackingCVClassifier equivalent
-# Define trainControl
-train_control <- trainControl(method="cv", number=10, savePredictions = TRUE, classProbs = TRUE)
-
-# Define models
-model_list <- caretList(
-  X_train, y_train,
-  trControl = train_control,
-  methodList = c("xgbTree", "knn", "svmRadial")
-)
-
-# Stacking models
-stack_control <- trainControl(method="cv", number=10)
-stack.glm <- caretStack(model_list, method="glm", trControl=stack_control)
-
-# Predict on test data
-stack_pred <- predict(stack.glm, newdata = X_test)
-
-# Confusion matrix and accuracy
-conf_matrix <- confusionMatrix(stack_pred, y_test)
-scv_acc_score <- conf_matrix$overall['Accuracy'] * 100
-
-# Print results
-print("Confusion Matrix:")
-print(conf_matrix$table)
-print(paste("Accuracy of StackingCVClassifier:", scv_acc_score, "\n"))
-print(conf_matrix)
+plot(lr_ROC, type = "s", col = "red", legacy.axes = TRUE)
+plot(mda_ROC, type = "s", add = TRUE, col = "green", legacy.axes = TRUE)
+plot(plr_ROC, type = "s", add = TRUE, col = "orange", legacy.axes = TRUE)
+plot(nnet_ROC, type = "s", add = TRUE, col = "blue", legacy.axes = TRUE)
+plot(knn_ROC, type = "s", add = TRUE, col = "purple", legacy.axes = TRUE)
+plot(dt_ROC, type = "s", add = TRUE, col = "brown", legacy.axes = TRUE)
+plot(rf_ROC, type = "s", add = TRUE, col = "gray", legacy.axes = TRUE)
+legend("bottomright", legend = c("Logistic Regression", "Mixture Discriminant Analysis", "Penalized Logistic Regression",
+                                 "Neural Network", "K-Nearest Neighbor", "Decision Trees", "Random Forest"),
+       col = c("red", "green", "orange", "blue", "purple", "brown", "gray"), lwd = 2)
+title(main = "ROC AUC Curves for each model")
 ```
+
+
+## Final Model Selection
+
+```{r}
+# Best model based on ROC-AUC
+best_AUC <- metrics_df[which.max(metrics_df$ROC_AUC), ]
+best_AUC
+```
+
+```{r}
+# Best model based on Accuracy
+best_Acc <- metrics_df[which.max(metrics_df$Accuracy), ]
+best_Acc
+```
+
+The model with the highest accuracy is the Random Forest with an accuracy of 0.9009. The model with the highest ROC AUC is the Logistic Regression with an AUC of 0.9025. The best model should ideally have both a high ROC AUC and high accuracy. 
+Based on the results, Random Forest is considered the best model due to its highest accuracy (0.9009901) and a competitive ROC AUC (0.8925095), making it a strong performer in both metrics.
+
+## Feature Importance Plot of the Optimal model (Random Forest)
+
+```{r}
+rf_ImpVar <- varImp(rf_model, scale = FALSE)
+plot(rf_ImpVar, top = 8, main = "Important Features for Diagnosis of Heart Attack")
+```
+
+
 
 
 
